@@ -1,0 +1,13 @@
+#!/bin/sh
+apk -q update
+updates=$(apk -u list | awk 'END{print NR}')
+
+if [ $updates != 0 ]; then
+ echo "CRITICAL: $updates packages available for upgrade"
+ exit 2;
+else
+ echo "APK OK: No packages available for urgrade."
+ exit $?
+fi
+echo "UNKNOWN"
+exit 3

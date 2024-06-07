@@ -1,0 +1,22 @@
+#!/bin/sh
+free | grep 'Mem\|Swap' | awk '{sum+=$2;used+=$3;free+=$4} END{
+
+per=used/sum*100;
+warn=80;
+crit=90;
+
+if (per > 0 && per < warn ) {
+	retval=0;
+	printf "MEM OK: "; }
+else if (per > warn && per < crit ) {
+	retval=1
+	printf "MEM WARNING: "; }
+else if (per > crit) {
+	retval=2
+	printf "MEM CRITICAL: "; }
+else
+	exit 3;
+
+printf "%.0f\%%\ used memory - total: %.0f\ MB, used: %.0f\ MB, free: %.0f\ MB|MemUsed=%.0f\%%;%.0f;%.0f\n", per, sum/1024, used/1024, free/1024, per, warn, crit;
+exit retval;
+}' ; exit $?

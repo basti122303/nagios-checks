@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+import json
+import urllib.request
+import re
+from datetime import datetime
+
+date_format = "%Y-%m-%d"
+eol = ''
+retval = ''
+
+try: 
+    url = 'https://alpinelinux.org/releases/'
+    response = urllib.request.urlopen(url)
+    webdata = response.read()
+    webdata = webdata.decode('utf-8')
+    content = re.findall(r"(<table[\s\w\W]*<\/table>)", webdata)
+    # cleanup html
+    content = str(content).replace("&bull;","").replace("> <","><")
+except:
+    print("RELEASE UNKNOWN: No release table on https://alpinelinux.org/releases/")
+    exit (3)
+
+try:
+    version = open("/etc/alpine-release", "r").read().rstrip()
+except:
+    print("RELEASE UNKNOWN: No /etc/alpine-release found")
+    exit (3)
+
+# html_to_json part is from https://github.com/mdminhazulhaque/html-table-to-json
+try: 
+    from BeautifulSoup import BeautifulSoup
+except ImportError:
+    from bs4 import BeautifulSoup
+
+def html_to_json(content, indent=None):
+    soup = BeautifulSoup(content, "html.parser")
+    rows = soup.find_all("tr")
+    
+    headers = {}
+    thead = soup.find("thead")
+    if thead:
+        thead = soup.find_all("th")
+        for i in range(len(thead)):
+            headers[i] = thead[i].text.strip().lower()
+    data = []
+    for row in rows:
+        cells = row.find_all("td")
+        if thead:
+            items = {}
+            if len(cells) > 0:
+                for index in headers:
+                    items[headers[index]] = cells[index].text
+        else:
+            items = []
+            for index in cells:
+                items.append(index.text.strip())
+        if items:
+            data.append(items)
+    return json.dumps(data, indent=indent)
+
+if __name__ == "__main__":
+
+    content = html_to_json(content)
+    data = json.loads(content)
+    for i in data:
+        if version in i['minor releases']:
+            eol = i['end of support']
+            break
+
+    eol_date = datetime.strptime(eol, date_format)
+    delta = eol_date - datetime.today()
+
+    if delta.days > 365:
+        print("RELEASE OK:", version, "/ EOL:", eol)
+        exit(0)
+    elif delta.days < 100:
+        print("RELEASE CRITICAL:", version, "/ EOL:", eol)
+        exit(2)
+    elif delta.days < 365:
+        print("RELEASE WARNING:", version, "/ EOL:", eol)
+        exit(1)
+    else:
+        print("RELEASE UNKNOWN:")
+        exit (3)
+
+    exit(3)
