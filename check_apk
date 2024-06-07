@@ -6,7 +6,7 @@ if [ $updates != 0 ]; then
  echo "CRITICAL: $updates packages available for upgrade"
  exit 2;
 else
- echo "APK OK: No packages available for urgrade."
+ echo "APK OK: No packages available for upgrade."
  exit $?
 fi
 echo "UNKNOWN"
