@@ -1,0 +1,98 @@
+#!/bin/bash
+
+OS_RELEASE_FILE="/etc/os-release"
+DEBIAN_CSV="/usr/share/distro-info/debian.csv"
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+
+# Get local codename
+if [[ -f "$OS_RELEASE_FILE" ]]; then
+    source "$OS_RELEASE_FILE"
+    LOCAL="${VERSION_CODENAME:-}"
+else
+    echo "UNKNOWN - $OS_RELEASE_FILE not found"
+    exit $STATE_UNKNOWN
+fi
+
+if [[ -z "$LOCAL" ]]; then
+    echo "UNKNOWN - Local VERSION_CODENAME not found"
+    exit $STATE_UNKNOWN
+fi
+
+# Adjust this to the images path for your architecture / variant
+# Examples: raspios_armhf, raspios_arm64, raspios_full_arm64, etc.
+UPSTREAM_IMAGES_URL="https://downloads.raspberrypi.com/raspios_arm64/images/"
+
+# Fetch listing
+HTML=$(curl -s --fail "$UPSTREAM_IMAGES_URL")
+if [[ $? -ne 0 || -z "$HTML" ]]; then
+    echo "UNKNOWN - Could not fetch upstream listing from $UPSTREAM_IMAGES_URL"
+    exit $STATE_UNKNOWN
+fi
+
+# Debug: uncomment to see what HTML you got
+# echo "$HTML" >&2
+
+# Extract subdirectory names with date
+# e.g. lines like: "raspios_arm64-2025-05-13/" or in bracketed DIR entries etc
+LATEST_DIR=$(echo "$HTML" \
+    | grep -oP 'raspios_[^/]+-\d{4}-\d{2}-\d{2}(?=/)' \
+    | sort -r \
+    | head -n1)
+
+if [[ -z "$LATEST_DIR" ]]; then
+    # fallback: maybe the image files include the codename directly
+    # Try files like: 2025-05-07-raspios-bookworm-arm64.img.xz etc.
+    LATEST_FILE=$(echo "$HTML" \
+        | grep -oP '\d{4}-\d{2}-\d{2}-raspios-[a-z]+-[a-z0-9-]*\.img\.xz' \
+        | sort -r \
+        | head -n1)
+
+    if [[ -n "$LATEST_FILE" ]]; then
+        # Extract codename from file name
+        # e.g. 2025-05-07-raspios-bookworm-arm64.img.xz -> bookworm
+        LATEST=$(echo "$LATEST_FILE" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-raspios-([a-z]+)-.*/\1/')
+    else
+        echo "UNKNOWN - Could not parse latest PiOS release from upstream (no matching directories or files)"
+        exit $STATE_UNKNOWN
+    fi
+else
+    # Extract codename from directory name
+    # e.g. raspios_arm64-2025-05-13 -> we need to find codename by inspecting contents inside that directory
+    # Directory name may not contain codename. So fetch inside.
+    SUBDIR_URL="${UPSTREAM_IMAGES_URL}${LATEST_DIR}/"
+    SUBHTML=$(curl -s --fail "$SUBDIR_URL")
+    if [[ $? -ne 0 || -z "$SUBHTML" ]]; then
+        echo "UNKNOWN - Could not fetch subdirectory listing $SUBDIR_URL"
+        exit $STATE_UNKNOWN
+    fi
+
+    # Try to find a file name inside with codename
+    LATEST_FILE2=$(echo "$SUBHTML" \
+        | grep -oP '\d{4}-\d{2}-\d{2}-raspios-[a-z]+-[a-z0-9-]*\.img\.xz' \
+        | sort -r \
+        | head -n1)
+
+    if [[ -n "$LATEST_FILE2" ]]; then
+        LATEST=$(echo "$LATEST_FILE2" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-raspios-([a-z]+)-.*/\1/')
+    else
+        # maybe fallback to codename in directory name (if directory name encodes it)
+        # but many directory names like raspios_arm64-2025-05-13 don't include codename
+        echo "UNKNOWN - Could not locate file with codename inside latest directory $SUBDIR_URL"
+        exit $STATE_UNKNOWN
+    fi
+fi
+
+LOCAL_NUM=$(awk -F',' -v cname="$LOCAL" '$3 ~ cname { print $1 }' /usr/share/distro-info/debian.csv)
+LATEST_NUM=$(awk -F',' -v cname="$LATEST" '$3 ~ cname { print $1 }' /usr/share/distro-info/debian.csv)
+
+# Now compare
+if [[ "$LOCAL" == "$LATEST" ]]; then
+    echo "OK - RaspiOS $LOCAL_NUM ($LOCAL)"
+    exit $STATE_OK
+else
+    echo "WARNING - RaspiOS $LOCAL_NUM ($LOCAL) installed / $LATEST_NUM stable)"
+    exit $STATE_WARNING
+fi
